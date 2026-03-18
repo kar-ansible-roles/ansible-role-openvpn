@@ -1,0 +1,16 @@
+---
+# defaults file for ansible-role-openvpn
+openvpn_dir: "/etc/openvpn"
+openvpn_easyrsa_dir: "/usr/share/easy-rsa"
+
+openvpn_clients:
+ - client_rick
+ - client_morty
+
+# network
+openvpn_port: 1194 #ovpn port
+openvpn_protocol: udp
+openvpn_subnet: 10.9.0.0
+openvpn_subnet_mask: 255.255.255.0
+openvpn_external_address: "{{ ansible_default_ipv4.address }}" # server address from hosts
+openvpn_external_interface: eth0

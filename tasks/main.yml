@@ -1,0 +1,8 @@
+---
+# tasks file for ansible-role-openvpn
+- name: OpenVPN | Update apt cache
+  ansible.builtin.apt:
+    update_cache: yes
+
+- include_tasks: server.yml
+- include_tasks: client.yml

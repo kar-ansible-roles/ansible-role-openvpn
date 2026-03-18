@@ -1,0 +1,201 @@
+# tasks for server-side
+- name: OpenVPN | Install packages
+  ansible.builtin.apt:
+    name:
+     - openvpn
+     - easy-rsa
+     - iptables-persistent #Для работы с NAT
+    state: present
+  notify:
+   - enable openvpn
+
+
+- name: OpenVPN | Enable IPv4 forwarding
+  ansible.posix.sysctl:
+    name: net.ipv4.ip_forward
+    value: '1'
+    sysctl_set: true
+    state: present
+    reload: true
+    ignoreerrors: true
+  failed_when: false
+
+- name: OpenVPN | Create IPTables NAT Chain
+  ansible.builtin.iptables:
+    table: nat
+    chain: POSTROUTING
+    jump: MASQUERADE
+    protocol: all
+    source: '0.0.0.0/0'
+    destination: '0.0.0.0/0'
+    comment: Ansible NAT Masquerade
+
+- name: OpenVPN | Add iptables MASQUERADE rule for VPN subnet
+  ansible.builtin.iptables:
+    table: nat
+    chain: POSTROUTING
+    out_interface: "{{ openvpn_external_interface }}"
+    source: "{{ item }}"
+    jump: MASQUERADE
+    state: present
+  loop: 
+    - "{{ openvpn_subnet }}/24"
+    - "{{ openvpn_subnet_for_reserved }}/24"
+
+- name: OpenVPN | Save iptables-rules
+  command: netfilter-persistent save
+
+#- name: OpenVPN | Ensure OpenVPN push directive for redirect-gateway
+#  lineinfile:
+#    path: /etc/openvpn/server.conf
+#    regexp: '^push "redirect-gateway'
+#    line: 'push "redirect-gateway def1 bypass-dhcp"'
+#    insertafter: '^#.*push'
+#    backup: yes
+
+
+
+
+- name: "OpenVPN | ensure {{ openvpn_dir }}/easy-rsa exists"
+  file:
+    path: "{{ openvpn_dir }}/easy-rsa"
+    state: directory
+    mode: 0755 
+
+- name: OpenVPN | Create vars file
+  copy:
+    dest: "{{ openvpn_easyrsa_dir }}/vars"
+    content: |
+      set_var EASYRSA_ALGO "ec"
+      set_var EASYRSA_DIGEST "sha512"
+
+- name: OpenVPN | easy-rsa init-pki
+  command: 
+    cmd: "{{ openvpn_easyrsa_dir }}/easyrsa init-pki"
+    chdir: "{{ openvpn_dir }}/easy-rsa"
+    creates: "{{ openvpn_dir }}/easy-rsa/pki"
+
+
+- name: OpenVPN | easy-rsa build-ca
+  command: 
+    cmd: "{{ openvpn_easyrsa_dir }}/easyrsa build-ca nopass"
+    chdir: "{{ openvpn_dir }}/easy-rsa"
+    creates: "{{ openvpn_dir }}/easy-rsa/pki/ca.crt"
+  environment:
+    EASYRSA_BATCH: "yes"
+
+
+- name: OpenVPN | easy-rsa gen-dh
+  command: 
+    cmd: "{{ openvpn_easyrsa_dir }}/easyrsa gen-dh"
+    chdir: "{{ openvpn_dir }}/easy-rsa"
+    creates: "{{ openvpn_dir }}/easy-rsa/pki/dh.pem"
+
+- name: OpenVPN | easy-rsa server nopass
+  command: 
+    cmd: "{{ openvpn_easyrsa_dir }}/easyrsa build-server-full server nopass"
+    chdir: "{{ openvpn_dir }}/easy-rsa"
+    creates: "{{ openvpn_dir }}/easy-rsa/pki/issued/server.crt"
+
+
+## clients
+- name: OpenVPN | easy-rsa client nopass
+  command: 
+    cmd: "{{ openvpn_easyrsa_dir }}/easyrsa build-client-full {{ item }} nopass"
+    chdir: "{{ openvpn_dir }}/easy-rsa"
+    creates: "{{ openvpn_dir }}/easy-rsa/pki/issued/{{ item }}.crt"
+  with_items:
+   - "{{ openvpn_clients + (openvpn_reserved_clients | dict2items | map(attribute='key') | list)  }}"
+
+
+
+
+- name: OpenVPN | easy-rsa gen-crl
+  command: 
+    cmd: "{{ openvpn_easyrsa_dir }}/easyrsa gen-crl"
+    chdir: "{{ openvpn_dir }}/easy-rsa"
+    creates: "{{ openvpn_dir }}/easy-rsa/pki/crl.crt"
+
+- name: OpenVPN | openvpn genkey
+  command: 
+    cmd: "openvpn --genkey --secret {{ openvpn_dir }}/easy-rsa/pki/ta.key"
+    creates: "{{ openvpn_easyrsa_dir }}/easy-rsa/pki/ta.key"
+
+- name: "OpenVPN | copy files to {{ openvpn_dir }}/server"
+  ansible.builtin.copy:
+    src: "{{ openvpn_dir }}/easy-rsa/pki/{{ item }}"
+    dest: "{{ openvpn_dir }}/server/{{ item | basename }}"
+    mode: "0644"
+    remote_src: true
+  loop:
+    - ca.crt
+    - dh.pem
+    - ta.key
+    - private/ca.key
+    - private/server.key
+    - issued/server.crt
+
+
+- name: OpenVPN | copy files to {{ openvpn_dir }}"
+  ansible.builtin.copy:
+    src: "{{ openvpn_dir }}/easy-rsa/pki/{{ item }}"
+    dest: "{{ openvpn_dir }}/{{ item | basename }}"
+    mode: "0644"
+    remote_src: true
+  loop:
+    - ca.crt
+    - ta.key
+
+
+- name: OpenVPN | Ensure CCD directory exists
+  file:
+    path: "{{ openvpn_dir }}/server/ccd"
+    state: directory
+    owner: root
+    group: root
+    mode: 0755
+
+- name: Create CCD files for reserved clients
+  loop: "{{ openvpn_reserved_clients | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  copy:
+    dest: "{{ openvpn_dir }}/server/ccd/{{ item.key }}"
+    content: |
+      ifconfig-push {{ item.value }} {{ openvpn_subnet_mask }}
+    owner: root
+    group: root
+    mode: 0644
+
+
+- name: OpenVPN | Ensure log directory exists
+  file:
+    path: /var/log/openvpn/server
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: OpenVPN | place server.conf
+  ansible.builtin.template:
+    src: server.conf.j2
+    dest: "{{ openvpn_dir }}/server.conf"
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - restart openvpn
+    - enable openvpn@server
+
+
+- name: OpenVPN | Update /etc/resolv.conf
+  copy:
+    dest: /etc/resolv.conf
+    content: |
+      nameserver 8.8.8.8
+      nameserver 1.1.1.1
+    owner: root
+    group: root
+    mode: '0644'
+
+    

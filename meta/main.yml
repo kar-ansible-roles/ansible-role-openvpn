@@ -1,0 +1,23 @@
+galaxy_info:
+  role_name: OpenVPN Server deployment
+  author: Karsak
+  description: A role for automated deployment of a OpenVPN server on Linux
+  company: Karo
+
+  license: MIT
+
+  min_ansible_version: 2.1
+
+  galaxy_tags: 
+    - vpn
+    - openvpn
+    - security
+
+  platforms:
+    - name: "Ubuntu"
+      versions: 
+        - "22.04"
+
+  version: "1.0.0"
+
+dependencies: []

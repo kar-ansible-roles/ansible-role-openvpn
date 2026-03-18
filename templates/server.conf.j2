@@ -1,0 +1,56 @@
+# -----------------------------------------------------
+# Основные параметры OpenVPN-сервера
+# -----------------------------------------------------
+port {{ openvpn_port }}
+proto {{ openvpn_protocol }}
+dev tun
+client-to-client
+
+ca   {{ openvpn_dir }}/server/ca.crt
+cert {{ openvpn_dir }}/server/server.crt
+key  {{ openvpn_dir }}/server/server.key
+dh   {{ openvpn_dir }}/server/dh.pem
+
+tls-auth {{ openvpn_dir }}/server/ta.key 0
+tls-server
+auth SHA256
+cipher AES-256-CBC
+tls-version-min 1.2
+tls-cipher TLS-ECDHE-ECDSA-WITH-AES-256-GCM-SHA384:TLS-ECDHE-RSA-WITH-AES-256-GCM-SHA384:TLS-DHE-RSA-WITH-AES-256-GCM-SHA384:TLS-ECDHE-ECDSA-WITH-AES-256-CBC-SHA384:TLS-ECDHE-RSA-WITH-AES-256-CBC-SHA384:TLS-DHE-RSA-WITH-AES-256-CBC-SHA256
+
+
+# -----------------------------------------------------
+# Динамический пул для всех клиентов
+# -----------------------------------------------------
+server {{ openvpn_subnet }} {{ openvpn_subnet_mask }}
+topology subnet
+ifconfig-pool-persist {{ openvpn_dir }}/server/ipp.txt
+
+# -----------------------------------------------------
+# Каталог для статических адресов
+# -----------------------------------------------------
+# в нём создадим файлы по имени CN клиента
+client-config-dir {{ openvpn_dir }}/server/ccd
+
+# -----------------------------------------------------
+# Push-опции, маршрутизация, DNS
+# -----------------------------------------------------
+push "redirect-gateway def1 bypass-dhcp"
+push "dhcp-option DNS 1.0.0.1"
+push "dhcp-option DNS 1.1.1.1"
+push "dhcp-option DNS 8.8.8.8"
+push "dhcp-option DNS 8.8.4.4"
+
+keepalive 5 30
+persist-key
+persist-tun
+user nobody
+group nogroup
+
+status /var/log/openvpn/server/status-openvpn_{{ openvpn_protocol }}_{{ openvpn_port }}.log
+status-version 1
+log-append /var/log/openvpn/openvpn.log
+verb 4
+
+script-security 1
+
